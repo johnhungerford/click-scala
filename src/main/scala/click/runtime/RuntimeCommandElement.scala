@@ -194,7 +194,9 @@ final case class Command(
         for {
             c <- finalCtx
             params <- buildParams
-        } yield handler(c :: params)
+        } yield {
+            handler(c :: params)
+        }
 
 final case class CommandGroup(
     commandPath: List[String],

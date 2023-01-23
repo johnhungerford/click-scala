@@ -2,6 +2,10 @@ package click
 
 import click.CliElement
 import click.util.Util
+import click.exception.ClickException
+import click.runtime.Command
+import click.runtime.ArgumentInterpreter
+import scala.util.NotGiven
 
 final case class CliCommand[
     T,
@@ -17,7 +21,15 @@ final case class CliCommand[
 )(
     using
     CliCommand.CtxTypes[CtxEles] =:= Ctx,
-) extends CliElement.CommandCliElement[T]
+) extends CliElement.CommandCliElement[T]:
+    def withDescription(description: String): CliCommand[T, Ctx, DirEles, CtxEles, DefCtx] =
+        copy(description = Some(description))
+    
+    def withoutDescription: CliCommand[T, Ctx, DirEles, CtxEles, DefCtx] =
+        copy(description = None)
+
+    def map[U](fn: T => U): CliCommand[U, Ctx, DirEles, CtxEles, DefCtx] =
+        copy(handler = (params) => fn(handler(params)))
 
 object CliCommand:
     /**
@@ -51,7 +63,27 @@ object CliCommand:
         case head *: tail => DirType[head] *: DirsType[tail]
 
     type Params[DirEles <: Tuple, Ctx] = (Ctx, DirsType[DirEles]) match
+        case (Unit, EmptyTuple) => Unit
         case (Unit, t *: EmptyTuple) => t
         case (Unit, tTup) => tTup
         case (ctx, EmptyTuple) => ctx
         case (ctx, tTup) => ctx *: tTup
+
+    extension [T, DirEles <: Tuple, CtxEles <: Tuple, DefCtx <:  CliCommand.DefaultEvalOrder](cmd: CliCommand[T, Unit, DirEles, CtxEles, DefCtx])
+        inline def evaluate: Array[String] => ClickException.OrErr[T] =
+            val command: Command = CommandTranslation.translate(cmd)
+
+            (args) => 
+                val parsedArgs = ParseArgs.parse(args.toList)
+                ArgumentInterpreter.interpret(command)(parsedArgs)(()).asInstanceOf[ClickException.OrErr[T]]
+
+    extension [T, Ctx, DirEles <: Tuple, CtxEles <: Tuple, DefCtx <:  CliCommand.DefaultEvalOrder](cmd: CliCommand[T, Ctx, DirEles, CtxEles, DefCtx])(
+        using
+        NotGiven[Ctx =:= Unit],
+    )
+        inline def evaluate(initialContext: Ctx): Array[String] => ClickException.OrErr[T] =
+            val command: Command = CommandTranslation.translate(cmd)
+
+            (args) => 
+                val parsedArgs = ParseArgs.parse(args.toList)
+                ArgumentInterpreter.interpret(command)(parsedArgs)(initialContext).asInstanceOf[ClickException.OrErr[T]]

@@ -64,12 +64,14 @@ case class Argument(
     applications: List[Appl[Any]],
     private val genCanInvoke: Argument => Boolean,
     private val genInvoke: (Argument, String, Int) => OrErr[Argument],
-    override val param: OrErr[Any],
+    private val genParam: Argument => OrErr[Any],
     override val paramIndex: Int,
 ) extends RuntimeDirElement:
     val canInvoke: Boolean = genCanInvoke(this)
     val invoke: (String, Int) => OrErr[Argument] =
         (str, int) => genInvoke(this, str, int)
+    override val param: OrErr[Any] = genParam(this)
+
 
 case class CtxOption(
     override val matches: LabelSelector => Boolean,
