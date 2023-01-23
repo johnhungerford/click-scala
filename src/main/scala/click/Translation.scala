@@ -41,12 +41,12 @@ object SelectorTranslation:
     
     inline def labelShow[FL <: Maybe[Label], SL <: Maybe[CharLabel]](fl: FL, sl: SL): String =
         inline fl match
-            case _: Unit => inline sl match
-                case _: Unit => error("Neither the full label nor the short label is defined")
-                case _ => s"--$fl/-$sl"
-            case _ => inline sl match
+            case _: String => inline sl match
+                case _: Char => s"-$sl/--$fl"
                 case _: Unit => s"--$fl"
-                case _ => s"--$fl/-$sl"
+            case _: Unit => inline sl match
+                case _: Char => s"-$sl"
+                case _: Unit => error("Neither the full label nor the short label is defined")
     
 
 object DirOptionTranslation:
@@ -249,7 +249,7 @@ object ArgumentTranslation:
              inline erasedValue[MD] match
                 case _: CliArgument.Single => { (ele, arg, index) =>
                     if (ele.applications.nonEmpty)
-                        Left(InvalidOption(s"Cannot invoke argument $labelShow more than once"))
+                        Left(InvalidOption(s"Cannot invoke argument \"$labelShow\" more than once"))
                     else argt.parse(arg)
                         .map(argVal => ele.copy(applications = List(Appl(argVal, index))))
                 }
@@ -265,7 +265,7 @@ object ArgumentTranslation:
                     val upperLimit = natToInt[n]
                     { (ele, arg, index) =>
                         if (ele.applications.size >= upperLimit)
-                            Left(InvalidOption(s"Cannot invoke argument $labelShow more than $upperLimit times"))
+                            Left(InvalidOption(s"Cannot invoke argument \"$labelShow\" more than $upperLimit times"))
                         else argt.parse(arg)
                             .map(argVal => ele.copy(applications = Appl(argVal, index) :: ele.applications))
                     }
@@ -274,7 +274,7 @@ object ArgumentTranslation:
                     val upperLimit = natToInt[n]
                     { (ele, arg, index) =>
                         if (ele.applications.size >= upperLimit)
-                            Left(InvalidOption(s"Cannot invoke argument $labelShow more than $upperLimit times"))
+                            Left(InvalidOption(s"Cannot invoke argument \"$labelShow\" more than $upperLimit times"))
                         else argt.parse(arg)
                             .map(argVal => ele.copy(applications = Appl(argVal, index) :: ele.applications))
                     }
@@ -284,7 +284,7 @@ object ArgumentTranslation:
                     case _: Unit =>
                         (dirOpt) =>
                             if (dirOpt.applications.isEmpty)
-                                Left(InvalidOption(s"Must invoke $labelShow at least once"))
+                                Left(InvalidOption(s"Must invoke argument \"$labelShow\" at least once"))
                             else
                                 Right(dirOpt.applications.map(_.value))
                     case defaultValues: List[T] =>
@@ -297,7 +297,7 @@ object ArgumentTranslation:
                 (dirOpt) =>
                     dirOpt.applications match
                         case head :: other :: _ =>
-                            Left(InvalidOption(s"Cannot invoke $labelShow multiple times"))
+                            Left(InvalidOption(s"Cannot invoke argument \"$labelShow\" multiple times"))
                         case head :: Nil =>
                             Right(Some(head.value))
                         case Nil =>
@@ -307,21 +307,21 @@ object ArgumentTranslation:
                     case _: Unit => (dirOpt) =>
                         dirOpt.applications match
                             case head :: other :: _ =>
-                                Left(InvalidOption(s"Cannot invoke $labelShow multiple times"))
+                                Left(InvalidArgument(s"Cannot invoke argument \"$labelShow\" multiple times"))
                             case head :: Nil =>
                                 Right(head.value)
                             case Nil =>
-                                Left(InvalidOption(s"Required option $labelShow was never invoked"))
+                                Left(InvalidArgument(s"Required argument \"$labelShow\" was never invoked"))
                     case defaultValue: T => (dirOpt) =>
                         dirOpt.applications match
                             case head :: other :: _ =>
-                                Left(InvalidOption(s"Cannot invoke $labelShow multiple times"))
+                                Left(InvalidArgument(s"Cannot invoke argument \"$labelShow\" multiple times"))
                             case head :: Nil =>
                                 Right(head.value)
                             case Nil =>
                                 Right(defaultValue)
         
-        Argument(Nil, genCanInvoke, genInvoke, ???, paramIndex)
+        Argument(Nil, genCanInvoke, genInvoke, genParam, paramIndex)
 
 object CtxOptionTranslation:
     inline def translate[
@@ -513,6 +513,10 @@ object CommandTranslation:
             val typedEles = eles.asInstanceOf[CliFlag[a, b, c] *: tail]
             val (nextOpts, nextArgs) = translateDirectElements(typedEles.tail, paramIndex + 1)
             (DirFlagTranslation.translate(typedEles.head, paramIndex) :: nextOpts, nextArgs)
+        case _: (CliArgument[a, b, c, d] *: tail) =>
+            val typedEles = eles.asInstanceOf[CliArgument[a, b, c, d] *: tail]
+            val (nextOpts, nextArgs) = translateDirectElements(typedEles.tail, paramIndex + 1)
+            (nextOpts, ArgumentTranslation.translate(typedEles.head, paramIndex) :: nextArgs)
 
     inline def getCtxEvalOrder[Ord <: ContextCliElement.EvalOrder]: ContextCliElement.EvalOrder =
         inline erasedValue[Ord] match
@@ -567,7 +571,25 @@ object CommandTranslation:
         case _: EmptyTuple => (list) => EmptyTuple.asInstanceOf[Tup]
         case _: (tupHead *: tupTail) =>
             val nextFunction = listToTuple[tupTail]
-            (list) => (list.head *: nextFunction(list.tail)).asInstanceOf[Tup]
+            (list) => {
+                (list.head *: nextFunction(list.tail)).asInstanceOf[Tup]
+            }
+
+    inline def generateListConverter[DirEles <: Tuple, Ctx]: List[Any] => CliCommand.Params[DirEles, Ctx] =
+        inline erasedValue[Ctx] match
+            case _: Unit => inline erasedValue[DirEles] match
+                case _: EmptyTuple => (list) => ().asInstanceOf[CliCommand.Params[DirEles, Ctx]]
+                case _: (_ *: EmptyTuple) => (list) => list.tail.head.asInstanceOf[CliCommand.Params[DirEles, Ctx]]
+                case _: (_ *: _ *: _) =>
+                    val listConverter = listToTuple[DirEles]
+                    (list) => listConverter(list.tail).asInstanceOf[CliCommand.Params[DirEles, Ctx]]
+            case _ => inline erasedValue[DirEles] match
+                case _: EmptyTuple => (list) => list.head.asInstanceOf[CliCommand.Params[DirEles, Ctx]]
+                case _ =>
+                    val listConverter = listToTuple[Ctx *: DirEles]
+                    (list) => {
+                        listConverter(list).asInstanceOf[CliCommand.Params[DirEles, Ctx]]
+                    }
 
     inline def translate[
         T,
@@ -580,16 +602,35 @@ object CommandTranslation:
             case (eagerLocalCtxEles, localCtxEles, lazyLocalCtxEles) =>
                 inline translateDirectElements(cmd.directElements) match
                     case (options, arguments) =>
-                        val handler: List[Any] => Any = inline erasedValue[CliCommand.Params[DirEles, Ctx]] match
-                            case _: (Ctx *: tail) =>
-                                val listConverter = listToTuple[Ctx *: tail]
-                                (list) => cmd.handler(listConverter(list).asInstanceOf[CliCommand.Params[DirEles, Ctx]])
-                            case _: (t *: tail) => 
-                                val listConverter = listToTuple[Ctx *: tail]
-                                (list) => cmd.handler(listConverter(list.tail).asInstanceOf[CliCommand.Params[DirEles, Ctx]])
-                            case _: EmptyTuple => _ => cmd.handler(EmptyTuple.asInstanceOf[CliCommand.Params[DirEles, Ctx]])
-                            case _: Ctx => list => cmd.handler(list.head.asInstanceOf[CliCommand.Params[DirEles, Ctx]])
-                            case _ => list => cmd.handler(list.tail.head.asInstanceOf[CliCommand.Params[DirEles, Ctx]])
+                        val listConverter: List[Any] => CliCommand.Params[DirEles, Ctx] = generateListConverter[DirEles, Ctx]
+                        val handler: List[Any] => Any = (list) => cmd.handler(listConverter(list))
+                        // val handler: List[Any] => Any = inline erasedValue[CliCommand.Params[DirEles, Ctx]] match
+                        //     case _: (Ctx *: tail) =>
+                        //         println("HI")
+                        //         val listConverter = listToTuple[Ctx *: tail]
+                        //         (list) => {
+                        //             // println(listConverter(list))
+                        //             cmd.handler(listConverter(list).asInstanceOf[CliCommand.Params[DirEles, Ctx]])
+                        //         }
+                        //     case _: (t *: tail) =>
+                        //         println("THERE")
+                        //         val listConverter = listToTuple[Ctx *: tail]
+                        //         (list) => {
+                        //             // println(listConverter(list))
+                        //             cmd.handler(listConverter(list.tail).asInstanceOf[CliCommand.Params[DirEles, Ctx]])
+                        //         }
+                        //     case _: EmptyTuple => _ => {
+                        //         println("EmptyTuple")
+                        //         cmd.handler(EmptyTuple.asInstanceOf[CliCommand.Params[DirEles, Ctx]])
+                        //     }
+                        //     case _: Ctx => list => {
+                        //         println("Ctx")
+                        //         cmd.handler(list.head.asInstanceOf[CliCommand.Params[DirEles, Ctx]])
+                        //     }
+                        //     case _ => list => {
+                        //         println(s"Default: $list")
+                        //         cmd.handler(list.tail.head.asInstanceOf[CliCommand.Params[DirEles, Ctx]])
+                        //     }
                             
                         Command(
                             Nil,
