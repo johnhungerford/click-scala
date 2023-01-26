@@ -21,15 +21,41 @@ final case class CliCommand[
 )(
     using
     CliCommand.CtxTypes[CtxEles] =:= Ctx,
-) extends CliElement.CommandCliElement[T]:
+) extends CliElement.CommandCliElementWithCtx[T, Ctx]:
     def withDescription(description: String): CliCommand[T, Ctx, DirEles, CtxEles, DefCtx] =
         copy(description = Some(description))
     
     def withoutDescription: CliCommand[T, Ctx, DirEles, CtxEles, DefCtx] =
         copy(description = None)
 
-    def map[U](fn: T => U): CliCommand[U, Ctx, DirEles, CtxEles, DefCtx] =
+    transparent inline def map[U](fn: T => U): CliCommand[U, Ctx, DirEles, CtxEles, DefCtx] =
         copy(handler = (params) => fn(handler(params)))
+
+    def withHandler[NewT](handler: CliCommand.Params[DirEles, Ctx] => NewT): CliCommand[NewT, Ctx, DirEles, CtxEles, DefCtx] =
+        copy(handler = handler)
+
+    protected inline def addDirectElement[EleT, Ele <: CliElement.DirectCliElement[EleT]](
+        element: Ele,
+    ): CliCommand[CliCommand.Params[Util.Append[Ele, DirEles], Ctx], Ctx, Util.Append[Ele, DirEles], CtxEles, DefCtx] =
+        copy(directElements = Util.Append(element, directElements), handler = identity)
+
+    protected transparent inline def addContextElement[NewCtx, Ele <: CliElement.ContextCliElement[NewCtx]](
+        element: Ele,
+    ): CliCommand[?, ?, DirEles, ?, DefCtx] =
+        import scala.compiletime.*
+        inline erasedValue[CtxEles] match
+            case _: EmptyTuple => copy[CliCommand.Params[DirEles, NewCtx], NewCtx, DirEles, Ele *: EmptyTuple, DefCtx](contextElements = element *: EmptyTuple, handler = identity)
+            case _ => inline summonInline[CliCommand.CtxTypes[Util.Append[Ele, CtxEles]] =:= Ctx] match
+                case ev => copy[T, Ctx, DirEles, Util.Append[Ele, CtxEles], DefCtx](contextElements = Util.Append(element, contextElements))(using ev)
+                case _ => error("Unable to add context option/flag: it's context type does not match the existing context type")
+    
+    transparent inline def add[Ele](element: Ele): CliCommand[?, ?, ?, ?, DefCtx] =
+        import scala.compiletime.*
+        inline element match
+            case directEle: CliElement.DirectCliElement[t] => addDirectElement(directEle)
+            case contextEle: CliElement.ContextCliElement[t] => addContextElement(contextEle)
+            case _ => error("Unable to add element: you must provide an option, flag, or argument")
+
 
 object CliCommand:
     /**

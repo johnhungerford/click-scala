@@ -63,7 +63,7 @@ object ArgumentInterpreter:
             case InputElement.LongOption(optStr) :: tail =>
                 context
                     .applyLongFlag(optStr)
-                    .getOrElse(Left(ClickException.InvalidOption(s"Invalid option --$optStr")))
+                    .getOrElse(Left(ClickException.InvalidOption(s"Invalid flag --$optStr")))
                     .flatMap(v => interpret(v)(tail)(ctx))
 
             case InputElement.Argument(argStr) :: tail =>

@@ -23,6 +23,12 @@ object RuntimeCommandElement:
     case class Appl[T](value: T, index: Int)
 
     enum DoubleLabel:
+        override def toString(): String = this match
+            case Short(label) => s"-$label"
+            case Long(label) => s"--$label"
+            case Both(shortLabel, longLabel) => s"--$longLabel/-$shortLabel"
+        
+
         final lazy val shortLabelOpt: Option[Char] = this match
             case Short(label) => Some(label)
             case Long(label) => None
@@ -38,6 +44,11 @@ object RuntimeCommandElement:
         case Both(shortLabel: Char, longLabel: String)
 
     enum LabelSelector:
+        override def toString(): String = this match
+            case Short(label) => s"-$label"
+            case Long(label) => s"--$label"
+        
+
         def matches(label: DoubleLabel): Boolean = this match
             case Short(shortLabel) if label.shortLabelOpt.contains(shortLabel) => true
             case Long(longLabel) if label.longLabelOpt.contains(longLabel) => true
@@ -115,46 +126,66 @@ final case class Command(
         else None
 
     def applyShortOptionArgument(label: Char, argument: String): Option[OrErr[Command]] =
+        val selector = LabelSelector.Short(label)
         updateCtxOpts {
-            case state@CtxOption(_, _, _, _) if state.matches(LabelSelector.Short(label)) =>
+            case state@CtxOption(_, _, _, _) if state.matches(selector) =>
                 state.invoke(argument, nextApplicationIndex)
         } orElse updateDirOpts {
-            case state@DirOption(_, _, _, _, _) if state.matches(LabelSelector.Short(label)) =>
+            case state@DirOption(_, _, _, _, _) if state.matches(selector) =>
                 state.invoke(argument, nextApplicationIndex)
+            case state@DirOneOf(_, _, _, _, _) if state.matchesAndIsFlag(selector).contains(false) =>
+                state.invokeOpt(selector, argument, nextApplicationIndex)
+            case state@DirAllOf(_, _, _, _, _) if state.matchesAndIsFlag(selector).contains(false) =>
+                state.invokeOpt(selector, argument, nextApplicationIndex)
         }
         
     def applyLongOptionArgument(label: String, argument: String): Option[OrErr[Command]] =
+        val selector = LabelSelector.Long(label)
         updateCtxOpts {
-            case state@CtxOption(_, _, _, _) if state.matches(LabelSelector.Long(label)) =>
+            case state@CtxOption(_, _, _, _) if state.matches(selector) =>
                 state.invoke(argument, nextApplicationIndex)
         } orElse updateDirOpts {
-            case state@DirOption(_, _, _, _, _) if state.matches(LabelSelector.Long(label)) =>
+            case state@DirOption(_, _, _, _, _) if state.matches(selector) =>
                 state.invoke(argument, nextApplicationIndex)
+            case state@DirOneOf(_, _, _, _, _) if state.matchesAndIsFlag(selector).contains(false) =>
+                state.invokeOpt(selector, argument, nextApplicationIndex)
+            case state@DirAllOf(_, _, _, _, _) if state.matchesAndIsFlag(selector).contains(false) =>
+                state.invokeOpt(selector, argument, nextApplicationIndex)
         }
 
     def applyShortFlag(label: Char): Option[OrErr[Command]] =
+        val selector = LabelSelector.Short(label)
         updateCtxOpts {
-            case state@CtxFlag(_, _, _, _) if state.matches(LabelSelector.Short(label)) =>
+            case state@CtxFlag(_, _, _, _) if state.matches(selector) =>
                 state.invoke(nextApplicationIndex)
         } orElse updateDirOpts {
-            case state@DirFlag(_, _, _, _, _) if state.matches(LabelSelector.Short(label)) =>
+            case state@DirFlag(_, _, _, _, _) if state.matches(selector) =>
                 state.invoke(nextApplicationIndex)
+            case state@DirOneOf(_, _, _, _, _) if state.matchesAndIsFlag(selector).contains(true) =>
+                state.invokeFlag(selector, nextApplicationIndex)
+            case state@DirAllOf(_, _, _, _, _) if state.matchesAndIsFlag(selector).contains(true) =>
+                state.invokeFlag(selector, nextApplicationIndex)
         }
 
     def applyLongFlag(label: String): Option[OrErr[Command]] =
+        val selector = LabelSelector.Long(label)
         updateCtxOpts {
-            case state@CtxFlag(_, _, _, _) if state.matches(LabelSelector.Long(label)) =>
+            case state@CtxFlag(_, _, _, _) if state.matches(selector) =>
                 state.invoke(nextApplicationIndex)
         } orElse updateDirOpts {
-            case state@DirFlag(_, _, _, _, _) if state.matches(LabelSelector.Long(label)) =>
+            case state@DirFlag(_, _, _, _, _) if state.matches(selector) =>
                 state.invoke(nextApplicationIndex)
+            case state@DirOneOf(_, _, _, _, _) if state.matchesAndIsFlag(selector).contains(true) =>
+                state.invokeFlag(selector, nextApplicationIndex)
+            case state@DirAllOf(_, _, _, _, _) if state.matchesAndIsFlag(selector).contains(true) =>
+                state.invokeFlag(selector, nextApplicationIndex)
         }
 
     def applyArgument(argument: String): OrErr[Command] =
         arguments.foldLeft(Right((false, List.empty[Argument])): OrErr[(Boolean, List[Argument])]) {
             case (err@Left(_), _) => err
             case (Right((true, updatedList)), nextArg) => Right(true, nextArg :: updatedList)
-            case (Right((false, currentList)), argEle @ Argument(_, _, _, _, _)) if argEle.canInvoke  =>
+            case (Right((false, currentList)), argEle @ Argument(_, _, _, _, _, _)) if argEle.canInvoke  =>
                 argEle.invoke(argument, nextApplicationIndex).map { newArgState =>
                     (true, newArgState :: currentList)
                 }

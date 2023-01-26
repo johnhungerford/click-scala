@@ -1,6 +1,7 @@
 package click.util
 
 import click.exception.ClickException.OrErr
+import scala.NonEmptyTuple
 
 object Util:
     type SameTwo[X] = (X, X)
@@ -30,7 +31,7 @@ object Util:
             case _ => Bool.False
 
 
-    type Append[T, Tp <: Tuple] <: Tuple = Tp match
+    type Append[T, Tp <: Tuple] <: NonEmptyTuple = Tp match
         case EmptyTuple => T *: EmptyTuple
         case head *: tail => head *: Append[T, tail]
 
@@ -50,3 +51,10 @@ object Util:
         seq.foldLeft(Right(List.empty[A]): OrErr[List[A]]) { (currentSeq, nextOrErr) =>
             currentSeq.flatMap(seq => nextOrErr.map(_ :: seq))
         }.map(_.reverse)
+
+    transparent inline def convertType[A, B](a: A): B =
+        scala.compiletime.summonInline[A <:< B](a)
+    
+    object extensions:
+        extension [A](a: A)
+            transparent inline def inlineAs[B]: B = convertType[A, B](a)
